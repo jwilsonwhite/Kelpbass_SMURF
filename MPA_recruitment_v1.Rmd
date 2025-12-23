@@ -1,0 +1,673 @@
+---
+title: "MPA_recruitment_v1"
+author: "Will White, edited by JK Hopf"
+date: "10/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r warnings=FALSE, echo=FALSE}
+require(tidyverse)
+require(glarma)
+require(devtools)
+require(MuMIn)
+require(reshape)
+require(ggpubr)
+require(nlme)
+install('PISCO.file.helpers')
+library(PISCO.file.helpers)
+```
+
+```{r}
+# load data and set global parameters. Note that PCLA = Paralabrax clathratus in PISCO databases
+M = 0.288 # kelp bass natural mortality rate, from Young (1963) as cited in White et al. (2013, OCMA)
+k = 0.06
+Linf = 69.8
+t0 = -3.5
+MinLen = 15 # minimum length of fish to be counted (cm). Note that legal size limit is 36 cm. 15 cm should be older than a YOY
+# SMURF data
+Dsmurf <- Smurfdata('PCLA',Names=TRUE) # note that field 'fsd' is fish per SMURF per day. Standardized unit.
+# Subtidal fish counts
+Dfish = SBTLdata('PCLA',MinLen,Names = TRUE)
+# Kelp swath transect data
+Dswath = SWATHdata()
+
+# Get the site alignment table
+Meta= read.csv('../Mapping/PISCO_sites_to_map.csv')
+Meta$include = as.logical(Meta$include)
+
+# Combine all the datasets
+DD <- linkdata(Dsmurf,Dfish,Dswath,Meta,M)
+
+# double-check this code
+
+# Choose certain sites to include in analysis (those where kelp bass actually occur)
+OKSites = (Meta$sitename_short[Meta$include])
+OKSites = levels(factor(OKSites))
+
+
+```
+
+```{r}
+# Von Bertalanffy growth curves
+Ages<-0:3
+La <- Linf*(1 - exp(-k*(Ages-t0)))
+D = data.frame(age=Ages,La = La)
+ggplot(data=D,aes(x=Ages,y=La))+
+  geom_line()+
+  theme_bw()
+```
+
+
+## Heatmap of Kelp bass survey densities
+
+```{r, echo=FALSE}
+# Heatmap of SBTL data
+Dfish_sub <- subset(Dfish,subset=(Dfish$Site=='ANACAPA_ADMIRALS'|
+                                      Dfish$Site=='ANACAPA_EAST_FISH_CAMP'|
+                                    Dfish$Site=='ANACAPA_EAST_ISLE'|
+                                    Dfish$Site=='ANACAPA_LIGHTHOUSE_REEF'|
+                                    Dfish$Site=='ANACAPA_MIDDLE_ISLE'|
+                                    Dfish$Site=='ANACAPA_WEST_ISLE'|
+                                      Dfish$Site=='SCI_CAVERN_POINT'|
+                                    Dfish$Site=='SCI_GULL_ISLE'|
+                                    Dfish$Site=='SCI_HAZARDS'|
+                                    Dfish$Site=='SCI_SCORPION'|
+                                    Dfish$Site=='SCI_PAINTED_CAVE'|
+                                    Dfish$Site=='SCI_PELICAN'|
+                                    Dfish$Site=='SCI_POTATO_PASTURE'|
+                                    Dfish$Site=='SCI_SCORPION_ANCHORAGE'|
+                                    Dfish$Site=='SCI_VALLEY'|
+                                    Dfish$Site=='SRI_SOUTH_POINT'|
+                                    Dfish$Site=='SRI_JOHNSONS_LEE_NORTH'|
+                                    Dfish$Site=='SRI_JOHNSONS_LEE_SOUTH'))
+
+
+Dfish_sub$Site<- factor(Dfish_sub$Site,levels=c('SRI_JOHNSONS_LEE_SOUTH','SRI_JOHNSONS_LEE_NORTH',
+'SRI_SOUTH_POINT','SCI_VALLEY','SCI_GULL_ISLE','SCI_PELICAN','SCI_HAZARDS','SCI_PAINTED_CAVE',
+'SCI_CAVERN_POINT','SCI_POTATO_PASTURE','SCI_SCORPION','SCI_SCORPION_ANCHORAGE','ANACAPA_ADMIRALS','ANACAPA_LIGHTHOUSE_REEF',
+'ANACAPA_EAST_FISH_CAMP','ANACAPA_WEST_ISLE','ANACAPA_MIDDLE_ISLE','ANACAPA_EAST_ISLE')) # add in ordered factors
+
+# plot
+ggplot(Dfish_sub,aes(y=Site,x=Year))+
+  geom_raster(aes(fill=PCLA.fpt/60*100))+
+    scale_fill_gradient(name='Fish per 100 m2', 
+                        low = 'goldenrod1', #"#F80000",
+                        high = 'goldenrod4') #"#3E0100")
+fname <- paste('figures/PCLA_heatmap.eps',sep="")
+# ggsave(fname,device="eps")
+
+
+```
+
+Figure 2. Spatiotemporal pattern of kelp bass (>10 cm) at each site. Color scale indicates the number of kelp bass per 100m2 counted in visual transect surveys each sampling year. Missing cells are site-year combinations when sampling did not take place. Site names correspond to those in Fig. 1.
+
+
+## Heatmap of SMURF spatiotemporal pattern
+
+```{r, echo=FALSE}
+Dsmurf_sub <- subset(Dsmurf,subset=(Dsmurf$Site=='HAZ'|
+                                    Dsmurf$Site=='PEL'|
+                                    Dsmurf$Site=='ANA-WIN'|
+                                    Dsmurf$Site=='ANA-SOUTH'|
+                                    Dsmurf$Site=='SCORP'|
+                                      Dsmurf$Site=='GULL'|
+                                      Dsmurf$Site=='VALLEY'|
+                                      Dsmurf$Site=='SRI-CARR'|
+                                      Dsmurf$Site=='SRI-SOUTH' )) #|
+                                     # Dsmurf$Site=='SMI-SOUTH'|
+                                   # Dsmurf$Site=='SMI-NORTH'))
+Dsmurf_sub$Site<- factor(Dsmurf_sub$Site,levels=c('SMI-SOUTH','SMI-NORTH','SRI-SOUTH','SRI-CARR','GULL','VALLEY','HAZ','PEL','SCORP','ANA-WIN','ANA-SOUTH'))
+
+#plot
+fname <- paste('figures/SMURF_heatmap.eps',sep="")
+ggplot(Dsmurf_sub,aes(y=Site,x=Year))+
+geom_raster(aes(fill=(PCLA.fsd+1)))+
+  scale_fill_gradient(trans="log",breaks=c(1,10,100),
+                      low = "#56B1F7",
+                      high = "#132B43",
+                      name='Settlers collector^-1 d^-1')
+# ggsave(fname,device="eps")
+
+  
+```
+
+Figure 3. Spatiotemporal pattern of kelp bass larval supply to each site. Color scale indicates the number of kelp bass settlers per collector per day in each sampling year. Missing cells are site-year combinations when sampling did not take place. Site names correspond to those in Fig. 1.
+
+## Heatmap of kelp swath data
+```{r, echo=FALSE}
+Dswath_sub <- subset(Dswath,subset=(Dswath$Site=='ANACAPA_ADMIRALS'|
+                                      Dswath$Site=='ANACAPA_EAST_FISH_CAMP'|
+                                    Dswath$Site=='ANACAPA_EAST_ISLE'|
+                                    Dswath$Site=='ANACAPA_LIGHTHOUSE_REEF'|
+                                    Dswath$Site=='ANACAPA_MIDDLE_ISLE'|
+                                    Dswath$Site=='ANACAPA_WEST_ISLE'|
+                                      Dswath$Site=='SCI_CAVERN_POINT'|
+                                    Dswath$Site=='SCI_GULL_ISLE'|
+                                    Dswath$Site=='SCI_HAZARDS'|
+                                    Dswath$Site=='SCI_SCORPION'|
+                                    Dswath$Site=='SCI_PAINTED_CAVE'|
+                                    Dswath$Site=='SCI_PELICAN'|
+                                    Dswath$Site=='SCI_POTATO_PASTURE'|
+                                    Dswath$Site=='SCI_SCORPION_ANCHORAGE'|
+                                    Dswath$Site=='SCI_VALLEY'|
+                                    Dswath$Site=='SRI_SOUTH_POINT'|
+                                    Dswath$Site=='SRI_JOHNSONS_LEE_NORTH'|
+                                    Dswath$Site=='SRI_JOHNSONS_LEE_SOUTH'))
+Dswath_sub$Site<- factor(Dswath_sub$Site,levels=c('SRI_JOHNSONS_LEE_SOUTH','SRI_JOHNSONS_LEE_NORTH',
+'SRI_SOUTH_POINT','SCI_VALLEY','SCI_GULL_ISLE','SCI_PELICAN','SCI_HAZARDS','SCI_PAINTED_CAVE',
+'SCI_CAVERN_POINT','SCI_POTATO_PASTURE','SCI_SCORPION','SCI_SCORPION_ANCHORAGE','ANACAPA_ADMIRALS','ANACAPA_LIGHTHOUSE_REEF',
+'ANACAPA_EAST_FISH_CAMP','ANACAPA_WEST_ISLE','ANACAPA_MIDDLE_ISLE','ANACAPA_EAST_ISLE')) # add in ordered factors
+
+
+#plot
+ggplot(Dswath_sub,aes(y=Site,x=Year))+
+  geom_raster(aes(fill=(stipespt/60*100)))+
+    scale_fill_gradient(name='Kelp stipes per 100 m2',
+                        low = "#4AEA4A" ,
+                        high = "#0E3F10")
+  #continuous_scale(limits=c(0,35))
+
+fname <- paste('Figures/Kelp_heatmap.eps',sep="")
+# ggsave(fname,device="eps")
+
+  
+```
+## Setup data for analysis using GLMs
+
+```{r}
+#Restricted analysis to years 2003 onwards (establishment of MPAs). Only run this if doing all ages >= 1
+DDs = DD[DD$Year >= 2003,]
+DDs$MPAnum <- 0
+DDs$MPAnum[DDs$MPA=='SMR' | DDs$MPA=='SMCA']<- 1 # All Channel Islands SMCAs are no-take for PCLA
+
+#Which sites do not have enough data to include kelp as covariate?
+TooShort = c('ANACAPA_ADMIRALS','ANACAPA_EAST_FISH_CAMP','SCI_POTATO_PASTURE','SCI_SCORPION_ANCHORAGE',
+           'SRI_JOHNSONS_LEE_NORTH','SRI_JOHNSONS_LEE_SOUTH','SRI_SOUTH_POINT')
+TooShortLog = rep(FALSE,length(OKSites))
+#TooShortLog[c(1,2,12,14,16:18)]=TRUE # numerical equivalent for indexing
+TooShortLog[c(1,2,4,7,12,14,15,16:18)]=TRUE # numerical equivalent for indexing
+isMPA <- rep(FALSE,length(OKSites))
+isMPA[c(3,5,6,7,8,10,12,13,14,18)]=TRUE
+
+# pre-allocate variables to store GLM results & ggplot objects
+m1s = list(length(OKSites))
+mm0s = list(length(OKSites))
+mm1s = list(length(OKSites))
+mm2s = list(length(OKSites))
+mm3s = list(length(OKSites))
+mm4s = list(length(OKSites))
+mm5s = list(length(OKSites))
+mm6s = list(length(OKSites))
+mm7s = list(length(OKSites))
+mm8s = list(length(OKSites))
+mm8as = list(length(OKSites))
+mm9s = list(length(OKSites))
+mm10s = list(length(OKSites))
+mm11s = list(length(OKSites))
+R2s <- matrix(nrow = length(OKSites),ncol=12)
+AICs <- matrix(nrow=length(OKSites),ncol=12)
+GG <- list(length(OKSites))
+
+# all models for each site
+site_mm <- vector(mode = 'list', length = 12)
+time_coeffs <- matrix(nrow=length(OKSites),ncol=12)
+
+# give model names
+ModelNames <- c('a0','bT','dS','eT+S','jT+S+K','kT+S*K','gT+S_k','iS*K','cT_a','fT_a+S','hT_a+S_k','lT_a+S*K')
+
+#--------
+
+```
+
+## GLMs
+
+```{r}
+
+#### Need to create a new list of which sites can't do GLS
+
+
+Type = 'gls' # or 'gls' for AR models
+for (s in 1:length(OKSites)){ # which(isMPA==F)){ # 
+  print(s)
+  print(OKSites[s])
+  Dsub = DDs[DDs$Site==OKSites[s],]
+  Dsub <- Dsub[!is.na(Dsub$smurf.wgt),] # only take years when smurfing is available
+  Ysm = Dsub$Year[!is.na(Dsub$smurf.year)] # years with smurfing
+  maxYsm = max(Ysm)
+  
+  if (maxYsm < max(Dsub$Year)){ # if smurfing stopped early in the time series
+  Dsub <- Dsub[Dsub$Year<=(maxYsm+1),]} # take one year past when smurfing stopped
+
+  # Center & scale the covariates
+  Dsub$smurf.wgt = (Dsub$smurf.wgt-mean(Dsub$smurf.wgt,na.rm=T))/sd(Dsub$smurf.wgt,na.rm=T)
+  Dsub$stipespt = (Dsub$stipespt-mean(Dsub$stipespt,na.rm=TRUE))/sd(Dsub$stipespt,na.rm=TRUE)
+  Dsub$smurf.wgt.kelp = (Dsub$smurf.wgt.kelp-mean(Dsub$smurf.wgt.kelp,na.rm=TRUE))/sd(Dsub$smurf.wgt.kelp,na.rm=TRUE)
+  
+ m1.tmp <- ar(Dsub$PCLA.fpt)
+ m1s[[s]] <- m1.tmp
+
+# Rescale years to start at 0
+Dsub$YearRescale = Dsub$Year - 2003
+
+# Add in transient expectation trajectory from White et al. (2013):
+Dsub$Year.trans <- 1 - exp(-M*Dsub$YearRescale)
+
+Fam = 'gaussian'
+  
+if (Type=='glm'){
+  site_mm[[1]] <- glm(PCLA.fpt~1,data=Dsub,family=Fam) #mm0
+  site_mm[[2]] <- glm(PCLA.fpt~Year,data=Dsub,family=Fam) #mm1
+  site_mm[[3]] <- glm(PCLA.fpt~smurf.wgt,data=Dsub,family=Fam) #mm2
+  site_mm[[4]] <- glm(PCLA.fpt~Year+smurf.wgt,data=Dsub,family=Fam) #mm3
+  # print(site_mm[[4]]$coefficients)
+  site_mm[[5]] <- glm(PCLA.fpt~Year+smurf.wgt+stipespt,data=Dsub,family=Fam) #mm4
+  site_mm[[6]] <- glm(PCLA.fpt~Year+smurf.wgt*stipespt,data=Dsub,family=Fam) #mm5
+
+  site_mm[[7]] <- glm(PCLA.fpt~Year+smurf.wgt.kelp,data=Dsub,family=Fam) #mm6
+  site_mm[[8]] <- glm(PCLA.fpt~smurf.wgt*stipespt,data=Dsub,family=Fam) #mm7
+
+  #using asymptotic expectation from White et al. (2013)
+  site_mm[[9]] <- glm(PCLA.fpt~Year.trans,data=Dsub,family=Fam) #mm8
+  site_mm[[10]] <- glm(PCLA.fpt~Year.trans+smurf.wgt,data=Dsub,family=Fam) #mm9
+  site_mm[[11]] <- glm(PCLA.fpt~Year.trans+smurf.wgt.kelp,data=Dsub,family=Fam) #mm10
+  site_mm[[12]] <- glm(PCLA.fpt~Year.trans+smurf.wgt*stipespt,data=Dsub,family=Fam) #mm11
+} else {
+  
+  site_mm[[1]] <- gls(PCLA.fpt~1,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm0
+  site_mm[[2]] <- gls(PCLA.fpt~Year,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm1
+  site_mm[[3]] <- gls(PCLA.fpt~smurf.wgt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm2
+  site_mm[[4]] <- gls(PCLA.fpt~Year+smurf.wgt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm3
+  site_mm[[9]] <- gls(PCLA.fpt~Year.trans,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm8
+  # print(site_mm[[4]]$coefficients)
+  if (TooShortLog[s]){ # if ts is too short or missing kelp, just run GLM to generate the correct fields, but these models will be trimmed from the final analysis
+  site_mm[[5]] <- glm(PCLA.fpt~Year+smurf.wgt+stipespt,data=Dsub,family=Fam) #mm4
+  site_mm[[6]] <- glm(PCLA.fpt~Year+smurf.wgt*stipespt,data=Dsub,family=Fam) #mm5
+  site_mm[[7]] <- glm(PCLA.fpt~Year+smurf.wgt.kelp,data=Dsub,family=Fam) #mm6
+  site_mm[[8]] <- glm(PCLA.fpt~smurf.wgt*stipespt,data=Dsub,family=Fam) #mm7
+
+  #using asymptotic expectation from White et al. (2013)
+  site_mm[[10]] <- glm(PCLA.fpt~Year.trans+smurf.wgt,data=Dsub,family=Fam) #mm9
+  site_mm[[11]] <- glm(PCLA.fpt~Year.trans+smurf.wgt.kelp,data=Dsub,family=Fam) #mm10
+  site_mm[[12]] <- glm(PCLA.fpt~Year.trans+smurf.wgt*stipespt,data=Dsub,family=Fam) #mm11
+    
+  }else{ # GLS versions
+    
+  site_mm[[5]] <- gls(PCLA.fpt~Year+smurf.wgt+stipespt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm4
+  site_mm[[6]] <- gls(PCLA.fpt~Year+smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm5
+  site_mm[[7]] <- gls(PCLA.fpt~Year+smurf.wgt.kelp,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm6
+  site_mm[[8]] <- gls(PCLA.fpt~smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm7
+
+  #using asymptotic expectation from White et al. (2013)
+  site_mm[[10]] <- gls(PCLA.fpt~Year.trans+smurf.wgt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm9
+  site_mm[[11]] <- gls(PCLA.fpt~Year.trans+smurf.wgt.kelp,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm10
+  site_mm[[12]] <- gls(PCLA.fpt~Year.trans+smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1),na.action=na.omit) #mm11
+     print(s)
+    
+  }
+ 
+  
+  # attempt using tryCatch...creates errors, probably coded incorrectly
+  do.trycatch = F
+  if (do.trycatch){
+    print(s)
+  tryCatch(expr={site_mm[[5]] <- gls(PCLA.fpt~Year+smurf.wgt+stipespt,data=Dsub,correlation=corARMA(p=1))},
+          error=function(){site_mm[[5]] <- glm(PCLA.fpt~Year+smurf.wgt+stipespt,data=Dsub,family=Fam)},silent=TRUE)
+  tryCatch(site_mm[[6]] <- gls(PCLA.fpt~Year+smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1)),
+           site_mm[[6]] <- glm(PCLA.fpt~Year+smurf.wgt*stipespt,data=Dsub,family=Fam))#mm5
+  tryCatch(site_mm[[7]] <- gls(PCLA.fpt~Year+smurf.wgt.kelp,data=Dsub,correlation=corARMA(p=1)),
+           site_mm[[7]] <- glm(PCLA.fpt~Year+smurf.wgt.kelp,data=Dsub,family=Fam))#mm6
+  tryCatch(site_mm[[8]] <- gls(PCLA.fpt~smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1)),
+           site_mm[[8]] <- glm(PCLA.fpt~smurf.wgt*stipespt,data=Dsub,family=Fam)) #mm7
+
+  #using asymptotic expectation from White et al. (2013)
+  
+  tryCatch(site_mm[[10]] <- gls(PCLA.fpt~Year.trans+smurf.wgt,data=Dsub,correlation=corARMA(p=1)),
+          site_mm[[10]] <- glm(PCLA.fpt~Year.trans+smurf.wgt,data=Dsub,family=Fam)) #mm9
+  tryCatch(site_mm[[11]] <- gls(PCLA.fpt~Year.trans+smurf.wgt.kelp,data=Dsub,correlation=corARMA(p=1)),
+           site_mm[[11]] <- glm(PCLA.fpt~Year.trans+smurf.wgt.kelp,data=Dsub,family=Fam))#mm10
+  tryCatch(site_mm[[12]] <- gls(PCLA.fpt~Year.trans+smurf.wgt*stipespt,data=Dsub,correlation=corARMA(p=1)),
+          site_mm[[12]] <- glm(PCLA.fpt~Year.trans+smurf.wgt*stipespt,data=Dsub,family=Fam)) #mm11
+} # end if do.trycatch
+  
+  # the gls() function does not create AIC values, so have to do that manually
+  for (mm in 1:12){
+    site_mm[[mm]]$aic <- -2*logLik(site_mm[[mm]])+2*(length(coef(site_mm[[mm]]))-1)
+  }
+  
+} # end type = GLM
+  
+  # aggregate a list of model objects for later analysis (for this site)
+  # NEED TO REARRANGE BY MODELS LATER
+  site_mmS <- lapply(site_mm, summary)
+  
+  # pull out time coefficients (second coeff in all models that have time)
+  # remove sites that have n (number of years) <= k+1 (coefficients)
+  time_coeffs[s,] <- unlist(lapply(site_mm, function(x){
+        if(length(x$residuals)-length(x$coefficients)-1 < 1){
+          NA
+        }else{
+          x$coefficients[2]}}))
+  # hard code NAs for models that don't have time factor
+  time_coeffs[s,c(3,8)] <- NA
+  
+  
+  # AICs correction 
+  # for all models for this site
+  # remove sites that have n (number of years) <= k (coefficients) - 1
+  site_AICs <- lapply(site_mm, function(x){
+        if(length(x$residuals)-length(x$coefficients)-1 < 1){
+          NA
+        }else{
+          x$aic + (2*length(x$coefficients)^2 + 2*length(x$coefficients))/(length(x$residuals) - length(x$coefficients) - 1)}})
+  AICs[s,] <- unlist(site_AICs)
+  
+  # remove Infs as NAs
+  AICs[s, is.infinite(AICs[s,])] <- NA
+
+  # Likelihood-ratio-based pseudo-R2
+ # if (any(OKSites[s] == TooShort)){
+ # R2s[s] = r.squaredLR(site_mm[[3]],null=site_mm[[1]])
+ # }else{
+ # R2s[s] = r.squaredLR(site_mm[[8]],null=site_mm[[1]])  
+ # }
+  # calculate R2 values
+  for (mm in 1:12){
+    if (length(site_mm[[mm]]$residuals) - length(site_mm[[mm]]$coefficients) - 1 < 1){
+    R2s[s,mm] <- NA  
+    }else{
+ #   R2s[s,mm] <- 1-sum(site_mm[[mm]]$residuals^2)/sum(site_mm[[1]]$residuals^2)}
+    #R2s[s,mm] <-  r.squaredLR(site_mm[[mm]],null=site_mm[[1]])}
+      # Nagelkerken formula:
+      ntmp = length(site_mm[[mm]]$residuals)
+      R2s[s,mm] <- 1 - exp(-2/ntmp*(logLik(site_mm[[mm]])-logLik(site_mm[[1]])))}
+  }
+  R2s[R2s<0]=0
+
+  # Plotting object 
+  
+  # get predicted values
+  # for each model
+  mx2 <- vector(mode = "list", length = 12)
+  for (m in 1:12){
+    if (Type=='glm'){
+  mx <- predict(site_mm[[m]],newdata=Dsub,type='response',se.fit=TRUE)
+  
+  mx$YearRescale <- Dsub$YearRescale
+  mx$Upper <- mx$fit + 1.96*mx$se.fit
+  mx$Lower <- mx$fit - 1.96*mx$se.fit
+  mx2[[m]] <- data.frame(YearRescale=mx$YearRescale,fit=mx$fit,Upper=mx$Upper,Lower=mx$Lower)
+  mx2[[m]]$model <- ModelNames[m]
+  mx2[[m]]$model_num <- m
+  mx2[[m]]$AICc <- AICs[s,m]}
+    else{ #predict.gls was causing issues when there were missing data
+      mx <- list()
+  mx$fit <- site_mm[[m]]$fitted
+  
+  if (length(mx$fit) == length(Dsub$YearRescale)){ # if some years were omitted due to missing kelp data
+    mx$YearRescale <- Dsub$YearRescale
+  } else {
+    Ytmp = Dsub$YearRescale[!is.na(Dsub$stipespt)]
+    mx$YearRescale = Ytmp}
+  
+  
+ # mx$Upper <- mx$fit + 1.96*mx$se.fit
+#  mx$Lower <- mx$fit - 1.96*mx$se.fit
+  mx2[[m]] <- data.frame(YearRescale=mx$YearRescale,fit=mx$fit) #,Upper=mx$Upper,Lower=mx$Lower)
+  mx2[[m]]$model <- ModelNames[m]
+  mx2[[m]]$model_num <- m
+  mx2[[m]]$AICc <- AICs[s,m]  
+    }
+  }
+
+  
+  # join all the model outputs
+  mx2all <- reduce(mx2, rbind)
+  
+  # Dsub$Trueyear <- Dsub$Year+1998
+  
+  # add to subset dataframe
+  plot_df <- tibble(full_join(Dsub, mx2all, by = 'YearRescale'))
+  
+  # suppress plotting model fits when the AIC could not be calculated
+  plot_df$fit[is.na(plot_df$AICc)] <- NA 
+  
+  # color scale from https://stackoverflow.com/questions/9563711/r-color-palettes-for-many-data-classes
+  c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+  
+  # plot (only ones with valid AICcs)
+  #GG[[s]] <- ggplot(plot_df %>% filter(is.finite(AICc))) +
+  GG[[s]] <- ggplot(plot_df) +
+    geom_point(aes(x=Year,y=PCLA.fpt)) +
+    geom_line(aes(x=Year, y=fit, colour=as.factor(model)), linewidth = 0.75) +
+    xlim(2003,2020) +
+    ylab('') +
+    labs(title = OKSites[s]) +
+    scale_color_viridis_d(option='plasma')+
+    theme(legend.direction = "horizontal", legend.position = "bottom") +
+    theme_classic()
+  
+  # trying to fix alphabetization
+  # scale_color_manual(values = c25)+
+  #  scale_color_manual(values=colors,breaks=ModelNames)
+  
+  #  scale_color_manual(values=as.factor(ModelNames),breaks=ModelNames)+
+  
+} # end loop over sites
+
+# Analyze AIC & R2 results
+
+# Best model for short time series
+AICs.short <- AICs[TooShortLog,c(1:3,9)]
+R2s.short <- R2s[TooShortLog,c(1:3,9)]
+# Best model for longer time series
+AICs.long.MPA <- AICs[!TooShortLog&isMPA,]
+AICs.long.Ref <- AICs[!TooShortLog&!isMPA,]
+R2s.long.MPA <- R2s[!TooShortLog&isMPA,]
+R2s.long.Ref <- R2s[!TooShortLog&!isMPA,]
+# Split out MPA & Reference sites
+
+sumAICs.short <- colSums(AICs.short) - min(colSums(AICs.short))
+sumAICs.long.MPA <- colSums(AICs.long.MPA) - min(colSums(AICs.long.MPA))
+sumAICs.long.Ref <- colSums(AICs.long.Ref) - min(colSums(AICs.long.Ref))
+meanR2s.short <- colMeans(R2s.short)
+meanR2s.long.MPA <- colMeans(R2s.long.MPA) 
+meanR2s.long.Ref <- colMeans(R2s.long.Ref) 
+#rownames(sumAICs)<-OKSites
+ModelNames.short = ModelNames[c(1:3,9)]
+#colnames(sumAICs)<-ModelNames
+
+wsumAICs.short <- exp(-0.5*sumAICs.short)/sum(exp(-0.5*sumAICs.short))
+wsumAICs.long.MPA <- exp(-0.5*sumAICs.long.MPA)/sum(exp(-0.5*sumAICs.long.MPA))
+wsumAICs.long.Ref <- exp(-0.5*sumAICs.long.Ref)/sum(exp(-0.5*sumAICs.long.Ref))
+
+```
+
+```{r}
+#Analysis for older fish only
+
+
+```
+
+## Plotting results of model fits
+Put all data fit plots onto a single page
+```{r}
+# get legend from plot with all models
+leg1 <- get_legend(GG[[5]], position = NULL)
+ggarrange(plotlist = GG, ncol = 2, nrow = 3, 
+          legend = "right", legend.grob = leg1)
+
+# Split out into groups for saving
+ggarrange(plotlist = GG[1:6], ncol = 2, nrow = 3, 
+          legend = "right", legend.grob = leg1)
+fname <- paste('Figures/fitted_ts1.eps',sep="")
+ggsave(fname,device='eps')
+
+ggarrange(plotlist = GG[7:12], ncol = 2, nrow = 3, 
+          legend = "right", legend.grob = leg1)
+fname <- paste('Figures/fitted_ts2.eps',sep="")
+ggsave(fname,device='eps')
+
+ggarrange(plotlist = GG[13:18], ncol = 2, nrow = 3, 
+          legend = "right", legend.grob = leg1)
+fname <- paste('Figures/fitted_ts3.eps',sep="")
+ggsave(fname,device='eps')
+
+```
+
+
+
+Make dataframes for model parameter plots
+```{r}
+# add summed AICc for overall, refs, and MPAs
+absAICs <- rbind(abs(AICs), 
+                 colSums(abs(AICs), na.rm = F),
+                 colSums(abs(AICs[!TooShortLog,]), na.rm = F),
+                 colSums(abs(AICs[!isMPA,]), na.rm = F),
+                 colSums(abs(AICs[!isMPA&!TooShortLog,]), na.rm = F),
+                 colSums(abs(AICs[isMPA,]), na.rm = F),
+                 colSums(abs(AICs[isMPA&!TooShortLog,]), na.rm = F))
+
+# Compile R2 results similarly
+meanR2s <- rbind(R2s, 
+                 colMeans((R2s), na.rm = F),
+                 colMeans((R2s[!TooShortLog,]), na.rm = F),
+                 colMeans((R2s[!isMPA,]), na.rm = F),
+                 colMeans((R2s[!isMPA&!TooShortLog,]), na.rm = F),
+                 colMeans((R2s[isMPA,]), na.rm = F),
+                 colMeans((R2s[isMPA&!TooShortLog,]), na.rm = F))
+
+# get delta AICc & R2s
+# transpose AICs so that cols are sites and rows are models
+Output_df <- t(absAICs) %>% apply(., 2, function(x){x-min(x, na.rm = T)})
+Output_R2 <- t(R2s)
+
+# convert to long data
+Output_df <- melt(Output_df) %>% as_tibble()
+Output_R2 <- melt(Output_R2) %>% as_tibble()
+
+# create tibble for sites
+Sites_df <- tibble(X2 = 1:24, site = c(OKSites,"All","LngStsAll",
+                                       "AllRef","LngStsRef",
+                                       "AllMPA","LngStsMPA"), 
+                   status = c(isMPA,"All","LngStsAll",
+                                       "AllRef","LngStsRef",
+                                       "AllMPA","LngStsMPA")) %>% 
+  mutate(across("status", str_replace,"FALSE","Ref")) %>% 
+  mutate(across("status", str_replace,"TRUE","MPA")) 
+Sites_df$status <- factor(Sites_df$status, 
+                          levels = c("All","LngStsAll",
+                                     "AllMPA","LngStsMPA","MPA",
+                                     "AllRef","LngStsRef","Ref"))
+# same for R2
+# deprecated code for just R2 without means:
+#Sites_R2 <- tibble(X2 = 1:18, site = OKSites, status = isMPA) %>%
+#  mutate(across("status", str_replace, "FALSE","Ref")) %>%
+#  mutate(across("status", str_replace,"TRUE","MPA")) 
+#Sites_R2$status <- factor(Sites_R2$status)
+Sites_R2 <- tibble(X2 = 1:24, site = c(OKSites,"All","LngStsAll",
+                                       "AllRef","LngStsRef",
+                                       "AllMPA","LngStsMPA"), 
+                   status = c(isMPA,"All","LngStsAll",
+                                       "AllRef","LngStsRef",
+                                       "AllMPA","LngStsMPA")) %>% 
+  mutate(across("status", str_replace,"FALSE","Ref")) %>% 
+  mutate(across("status", str_replace,"TRUE","MPA")) 
+Sites_R2$status <- factor(Sites_R2$status, 
+                          levels = c("All","LngStsAll",
+                                     "AllMPA","LngStsMPA","MPA",
+                                     "AllRef","LngStsRef","Ref"))
+
+
+# add info % rename
+Output_df <- Output_df %>% 
+  left_join(Sites_df, by = "X2") %>% 
+  left_join(tibble(X1 = 1:12, model = ModelNames), by = "X1") %>% 
+  select(site, status= status, site_no = X2, model, model_no = X1, AICc = value)
+
+Output_R2 <- Output_R2 %>% 
+  left_join(Sites_R2, by = "X2") %>% 
+  left_join(tibble(X1 = 1:12, model = ModelNames), by = "X1") %>% 
+  select(site, status= status, site_no = X2, model, model_no = X1, R2 = value)
+
+# add time coeff to pre-made table
+Output_df <- Output_df %>% left_join(
+    melt(t(time_coeffs)) %>% as_tibble() %>% 
+    select(site_no = X2, model_no = X1, t_coeff = value),
+    by = c("site_no", "model_no"))
+
+```
+
+PLot AICcs & R2s heatmaps
+```{r}
+
+# Order the model plots in increasing complexity
+#ModelOrder = c(1,4,5,2,9,6,10,3,7,12,11,8)
+#L = levels(as.factor(Output_df$model))
+#L = c("10","4S","7S*K","2T","3T_a","6T_a+S","9T_a+S_k","12T_a+S*K","5T+S","8T+S_k","11T+S*K","10T+S+K")
+#Output_df$model = as.factor(Output_df$model)
+#Output_R2$model = as.factor(Output_R2$model)
+#levels(Output_df$model) = L
+#levels(Output_R2$model) = L
+
+
+
+ggplot(Output_R2, aes(x = site, y = model, fill = R2)) +
+  geom_tile() +
+  facet_grid(~status, scales = "free", space = "free") +
+  scale_fill_viridis_c(direction = 1, option = "C", begin = 0.3) +
+  geom_text(aes(label = round(R2, 2)),size=1.5) +
+  theme(axis.text.x = element_text(angle = 90))
+
+fname <- paste('Figures/R2_heatmap.eps',sep="")
+ggsave(fname,device='eps')
+
+```
+
+Plot time coefficient values for each site x model
+```{r}
+ggplot(Output_df, aes(x = site, y = model, fill = log10(t_coeff+1))) +
+  geom_tile() +
+  facet_grid(~status, scales = "free", space = "free") +
+  scale_fill_gradient2() +
+  geom_text(aes(label = round(t_coeff, 2))) +
+  theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
