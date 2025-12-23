@@ -7,4 +7,4 @@ The data formatting, analysis, and creation of all figures is found in the Rmark
 
 Prior to running this code, you will need to download the PISCO subtidal fish survey data, as the file is too large to be hosted on Github. This dataset is found in PISCO, Mark Carr, & Jenn Caselle. (2009). PISCO: Subtidal: Community Surveys: Fish Survey. PISCO MN. doi:10.6085/AA/pisco_subtidal.150.2. 
 
-The file pisco_fish_data.csv should be placed in the ../data folder on your local device.
+The downloaded file 'pisco_fish_data.csv' (or whatever the current equivalent is) should be placed in the ../data folder on your local device, and renamed to 'PISCO_kelpforest_fish.1.3.csv'. Alternatively you could update the code on line 16 of PISCO.file.helpers/R/SBTLdata.R to reflect the current name for that data file; taking this step may require re-running the document() function (in the roxygen2 library) to update the PISCO.file.helpers library.
