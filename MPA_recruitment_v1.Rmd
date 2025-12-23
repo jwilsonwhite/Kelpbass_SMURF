@@ -36,7 +36,7 @@ Dfish = SBTLdata('PCLA',MinLen,Names = TRUE)
 Dswath = SWATHdata()
 
 # Get the site alignment table
-Meta= read.csv('../Mapping/PISCO_sites_to_map.csv')
+Meta= read.csv('data/PISCO_sites_to_map.csv')
 Meta$include = as.logical(Meta$include)
 
 # Combine all the datasets
